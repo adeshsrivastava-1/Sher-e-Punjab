@@ -1,0 +1,10 @@
+{
+  "name": "Sher E Punjab Quito",
+  "description": "Authentic Indian Restaurant & Ecuadorian-Indian Fusion Dining in La Mariscal, Quito, Ecuador",
+  "requestFramePermissions": [
+    "geolocation"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
