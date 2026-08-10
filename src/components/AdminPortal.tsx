@@ -44,6 +44,24 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     setWhatsappNum(config.whatsappNumber);
   }, [config]);
 
+  useEffect(() => {
+    if (isOpen && authToken) {
+      fetch('/api/auth/verify', {
+        headers: { 'Authorization': `Bearer ${authToken}` }
+      })
+        .then(res => res.json())
+        .then(data => {
+          if (!data.authenticated) {
+            setAuthToken(null);
+            localStorage.removeItem('admin_token');
+          }
+        })
+        .catch(() => {
+          // If server error, preserve state or handle cleanly
+        });
+    }
+  }, [isOpen, authToken]);
+
   if (!isOpen) return null;
 
   // Handle Login
