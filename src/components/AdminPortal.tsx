@@ -33,6 +33,9 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
 
   // Settings State
   const [whatsappNum, setWhatsappNum] = useState(config.whatsappNumber);
+  const [payphoneStoreId, setPayphoneStoreId] = useState(config.payphone?.storeId || '');
+  const [payphoneToken, setPayphoneToken] = useState(config.payphone?.token || '');
+  const [payphoneIsSandbox, setPayphoneIsSandbox] = useState(config.payphone?.isSandbox ?? true);
 
   // Password Reset Form
   const [oldPassword, setOldPassword] = useState('');
@@ -42,6 +45,11 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
 
   useEffect(() => {
     setWhatsappNum(config.whatsappNumber);
+    if (config.payphone) {
+      setPayphoneStoreId(config.payphone.storeId || '');
+      setPayphoneToken(config.payphone.token || '');
+      setPayphoneIsSandbox(config.payphone.isSandbox ?? true);
+    }
   }, [config]);
 
   if (!isOpen) return null;
@@ -167,7 +175,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     }
   };
 
-  // Update Settings (WhatsApp phone)
+  // Update Settings (WhatsApp phone & Payphone Gateway)
   const handleSaveSettings = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
@@ -177,11 +185,19 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${authToken}`
         },
-        body: JSON.stringify({ whatsappNumber: whatsappNum })
+        body: JSON.stringify({
+          whatsappNumber: whatsappNum,
+          payphone: {
+            enabled: true,
+            storeId: payphoneStoreId,
+            token: payphoneToken,
+            isSandbox: payphoneIsSandbox
+          }
+        })
       });
       if (res.ok) {
         onConfigUpdated();
-        alert('WhatsApp settings updated successfully.');
+        alert('System settings and Payphone Gateway config updated successfully.');
       }
     } catch {
       alert('Failed to update settings.');
@@ -793,34 +809,101 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
               </div>
             )}
 
-            {/* TAB 2: WHATSAPP SETTINGS */}
+            {/* TAB 2: SYSTEM & PAYPHONE SETTINGS */}
             {activeTab === 'settings' && (
-              <form onSubmit={handleSaveSettings} className="space-y-4 max-w-md">
-                <h3 className="font-serif text-xl font-bold text-[#1C3A27]">WhatsApp Receiving Number</h3>
-                <p className="text-xs text-[#6B5E54]">
-                  All direct customer orders and instant reservations will dispatch to this WhatsApp phone number.
-                </p>
+              <form onSubmit={handleSaveSettings} className="space-y-6 max-w-xl">
+                {/* WhatsApp Section */}
+                <div className="bg-[#FFFDF9] p-5 rounded-2xl border border-gray-200 shadow-xs space-y-3">
+                  <h3 className="font-serif text-lg font-bold text-[#1C3A27] flex items-center gap-2">
+                    <span>📱 WhatsApp Receiving Number</span>
+                  </h3>
+                  <p className="text-xs text-[#6B5E54]">
+                    All direct customer orders and instant reservations will dispatch to this WhatsApp phone number.
+                  </p>
 
-                <div>
-                  <label className="block text-xs font-semibold mb-1">Phone Number (with Country Code)</label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="593987654321"
-                    value={whatsappNum}
-                    onChange={(e) => setWhatsappNum(e.target.value)}
-                    className="w-full px-4 py-2.5 border rounded-xl bg-white text-sm"
-                  />
-                  <span className="text-[10px] text-gray-500 mt-1 block">
-                    Example: <code>593987654321</code> (Ecuador +593 format).
-                  </span>
+                  <div>
+                    <label className="block text-xs font-semibold mb-1">Phone Number (with Country Code)</label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="593987654321"
+                      value={whatsappNum}
+                      onChange={(e) => setWhatsappNum(e.target.value)}
+                      className="w-full px-4 py-2.5 border border-gray-300 rounded-xl bg-white text-sm focus:ring-2 focus:ring-[#1C3A27] focus:outline-none"
+                    />
+                    <span className="text-[10px] text-gray-500 mt-1 block">
+                      Example: <code>593987900005</code> (Ecuador +593 format).
+                    </span>
+                  </div>
+                </div>
+
+                {/* Payphone Ecuador Gateway Section */}
+                <div className="bg-[#FFFDF9] p-5 rounded-2xl border border-orange-200 shadow-xs space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h3 className="font-serif text-lg font-bold text-[#FF5A00] flex items-center gap-2">
+                        <span>💳 Payphone Ecuador Payment Gateway</span>
+                      </h3>
+                      <p className="text-xs text-[#6B5E54] mt-0.5">
+                        Accept Visa, Mastercard, Diners, Discover and Payphone App payments directly in Ecuador.
+                      </p>
+                    </div>
+
+                    <span className={`px-2.5 py-1 text-[10px] font-bold rounded-full ${
+                      payphoneIsSandbox 
+                        ? 'bg-amber-100 text-amber-800 border border-amber-300' 
+                        : 'bg-green-100 text-green-800 border border-green-300'
+                    }`}>
+                      {payphoneIsSandbox ? 'Mode: Sandbox / Test' : 'Mode: Live Production'}
+                    </span>
+                  </div>
+
+                  <div className="space-y-3">
+                    <div>
+                      <label className="block text-xs font-semibold mb-1">Payphone Store ID (ID de Establecimiento)</label>
+                      <input
+                        type="text"
+                        placeholder="e.g. sher-e-punjab-quito"
+                        value={payphoneStoreId}
+                        onChange={(e) => setPayphoneStoreId(e.target.value)}
+                        className="w-full px-4 py-2.5 border border-gray-300 rounded-xl bg-white text-sm font-mono focus:ring-2 focus:ring-[#FF5A00] focus:outline-none"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold mb-1">Payphone Bearer Token (Private Token Developer)</label>
+                      <input
+                        type="password"
+                        placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                        value={payphoneToken}
+                        onChange={(e) => setPayphoneToken(e.target.value)}
+                        className="w-full px-4 py-2.5 border border-gray-300 rounded-xl bg-white text-sm font-mono focus:ring-2 focus:ring-[#FF5A00] focus:outline-none"
+                      />
+                      <span className="text-[10px] text-gray-500 mt-1 block">
+                        Get your Developer Token at <a href="https://payphone.app" target="_blank" rel="noreferrer" className="underline text-[#FF5A00] font-semibold">payphone.app</a>. If left empty, gateway runs in automatic simulation mode.
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-2 pt-1">
+                      <input
+                        type="checkbox"
+                        id="sandboxToggle"
+                        checked={payphoneIsSandbox}
+                        onChange={(e) => setPayphoneIsSandbox(e.target.checked)}
+                        className="w-4 h-4 text-[#FF5A00] rounded border-gray-300 focus:ring-[#FF5A00]"
+                      />
+                      <label htmlFor="sandboxToggle" className="text-xs font-semibold text-gray-700 cursor-pointer">
+                        Enable Sandbox Mode (Test transactions without live debit card charges)
+                      </label>
+                    </div>
+                  </div>
                 </div>
 
                 <button
                   type="submit"
-                  className="px-5 py-2.5 rounded-xl bg-[#1C3A27] text-white font-bold text-xs shadow-md"
+                  className="px-6 py-3 rounded-xl bg-[#1C3A27] hover:bg-[#2A5239] text-white font-bold text-xs shadow-md transition-all cursor-pointer"
                 >
-                  Update Settings
+                  Save All System Settings
                 </button>
               </form>
             )}

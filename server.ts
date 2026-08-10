@@ -68,7 +68,178 @@ app.get('/api/menu', (_req: Request, res: Response) => {
 // GET Settings
 app.get('/api/settings', (_req: Request, res: Response) => {
   res.setHeader('Cache-Control', 'public, max-age=60, s-maxage=60, stale-while-revalidate=300');
-  res.json({ success: true, data: restaurantConfig });
+  // Hide secret token in public settings response
+  const safeConfig = {
+    ...restaurantConfig,
+    payphone: restaurantConfig.payphone ? {
+      enabled: restaurantConfig.payphone.enabled,
+      storeId: restaurantConfig.payphone.storeId || '',
+      isSandbox: restaurantConfig.payphone.isSandbox,
+      hasToken: !!(restaurantConfig.payphone.token || process.env.PAYPHONE_TOKEN)
+    } : { enabled: true, storeId: '', isSandbox: true, hasToken: false }
+  };
+  res.json({ success: true, data: safeConfig });
+});
+
+// --- PAYPHONE ECUADOR PAYMENT GATEWAY ENDPOINTS ---
+
+// Get Payphone Status & Config
+app.get('/api/payphone/config', (_req: Request, res: Response) => {
+  const payphoneCfg = restaurantConfig.payphone || {
+    enabled: true,
+    storeId: process.env.PAYPHONE_STORE_ID || '',
+    token: process.env.PAYPHONE_TOKEN || '',
+    isSandbox: true
+  };
+
+  res.json({
+    success: true,
+    data: {
+      enabled: payphoneCfg.enabled,
+      storeId: payphoneCfg.storeId || process.env.PAYPHONE_STORE_ID || '',
+      isSandbox: payphoneCfg.isSandbox,
+      hasToken: !!(payphoneCfg.token || process.env.PAYPHONE_TOKEN),
+      currency: 'USD',
+      country: 'Ecuador',
+      vatRate: 0.15 // Ecuador 15% IVA
+    }
+  });
+});
+
+// Prepare Payphone Transaction
+app.post('/api/payphone/prepare', (req: Request, res: Response) => {
+  try {
+    const { totalAmountUSD, deliveryFeeUSD, customerName, customerPhone, customerEmail } = req.body;
+
+    if (!totalAmountUSD || totalAmountUSD <= 0) {
+      res.status(400).json({ error: 'Invalid order amount.' });
+      return;
+    }
+
+    const totalInCents = Math.round(totalAmountUSD * 100);
+    const deliveryInCents = Math.round((deliveryFeeUSD || 0) * 100);
+    const foodSubtotalInCents = totalInCents - deliveryInCents;
+
+    // Ecuador IVA 15% tax calculation breakdown
+    const amountWithTax = Math.round(foodSubtotalInCents / 1.15);
+    const tax = foodSubtotalInCents - amountWithTax;
+    const amountWithoutTax = deliveryInCents; // Non-taxable delivery charge
+
+    const clientTransactionId = `SEP-QUITO-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
+
+    const payphoneCfg = restaurantConfig.payphone || {
+      enabled: true,
+      storeId: process.env.PAYPHONE_STORE_ID || '',
+      token: process.env.PAYPHONE_TOKEN || '',
+      isSandbox: true
+    };
+
+    res.json({
+      success: true,
+      data: {
+        clientTransactionId,
+        amount: totalInCents,
+        amountWithTax,
+        amountWithoutTax,
+        tax,
+        currency: 'USD',
+        storeId: payphoneCfg.storeId || process.env.PAYPHONE_STORE_ID || 'sher-e-punjab-quito',
+        isSandbox: payphoneCfg.isSandbox || !payphoneCfg.token,
+        customerName: customerName || 'Valued Guest',
+        customerPhone: customerPhone || '',
+        customerEmail: customerEmail || 'cliente@sherepunjab.ec'
+      }
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: 'Failed to prepare Payphone transaction.', details: err.message });
+  }
+});
+
+// Confirm Payphone Payment (Validates with Payphone API or simulates sandbox authorization)
+app.post('/api/payphone/confirm', async (req: Request, res: Response) => {
+  try {
+    const { id, clientTransactionId, mockDetails } = req.body;
+
+    if (!clientTransactionId) {
+      res.status(400).json({ error: 'clientTransactionId is required.' });
+      return;
+    }
+
+    const payphoneToken = restaurantConfig.payphone?.token || process.env.PAYPHONE_TOKEN;
+    const isSandbox = restaurantConfig.payphone?.isSandbox ?? (!payphoneToken);
+
+    // If live token is configured, confirm with Payphone's official API
+    if (payphoneToken && !isSandbox && id) {
+      const response = await fetch('https://pay.payphonetodoesposible.com/api/button/V2/Confirm', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${payphoneToken}`
+        },
+        body: JSON.stringify({
+          id: Number(id),
+          clientTxId: clientTransactionId
+        })
+      });
+
+      const result = await response.json();
+
+      if (response.ok && (result.transactionStatus === 'Approved' || result.statusCode === 3)) {
+        res.json({
+          success: true,
+          data: {
+            transactionId: String(result.transactionId || id),
+            clientTransactionId,
+            status: 'APPROVED',
+            authorizationCode: result.authorizationCode || `PYP-${Math.floor(100000 + Math.random() * 900000)}`,
+            amount: result.amount || mockDetails?.amount || 0,
+            tax: result.tax || mockDetails?.tax || 0,
+            currency: 'USD',
+            cardBrand: result.cardBrand || result.bin || 'Visa/Mastercard',
+            lastDigits: result.lastDigits || '****',
+            phoneNumber: result.phoneNumber || mockDetails?.phoneNumber || '',
+            email: result.email || mockDetails?.email || '',
+            documentId: result.documentId || mockDetails?.documentId || '',
+            createdAt: new Date().toISOString()
+          }
+        });
+        return;
+      } else {
+        res.status(400).json({
+          error: result.message || 'Payment rejected by Payphone gateway.',
+          details: result
+        });
+        return;
+      }
+    }
+
+    // Sandbox / Test Mode Instant Verification
+    const authCode = `PYP-SB-${Math.floor(100000 + Math.random() * 900000)}`;
+    const txId = `PYP-TX-${Date.now()}`;
+
+    res.json({
+      success: true,
+      data: {
+        transactionId: txId,
+        clientTransactionId,
+        status: 'APPROVED',
+        authorizationCode: authCode,
+        amount: mockDetails?.amount || 2500,
+        tax: mockDetails?.tax || 300,
+        currency: 'USD',
+        cardBrand: mockDetails?.cardBrand || 'Visa Ecuador',
+        lastDigits: mockDetails?.lastDigits || '4242',
+        phoneNumber: mockDetails?.phoneNumber || '+593 99 123 4567',
+        email: mockDetails?.email || 'cliente@sherepunjab.ec',
+        documentId: mockDetails?.documentId || '1712345678',
+        createdAt: new Date().toISOString(),
+        isSandbox: true,
+        message: 'Payphone Sandbox Authorized Successfully'
+      }
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: 'Payphone confirmation failed.', details: err.message });
+  }
 });
 
 // LOGIN Endpoint
@@ -200,7 +371,7 @@ app.post('/api/menu/reset', verifyAdminToken, (_req: Request, res: Response) => 
 
 // PUT Update Restaurant Settings
 app.put('/api/settings', verifyAdminToken, (req: Request, res: Response) => {
-  const { whatsappNumber, openingHours } = req.body;
+  const { whatsappNumber, openingHours, payphone } = req.body;
 
   if (whatsappNumber) {
     // Sanitize phone number to keep numbers only
@@ -209,6 +380,15 @@ app.put('/api/settings', verifyAdminToken, (req: Request, res: Response) => {
 
   if (openingHours) {
     restaurantConfig.openingHours = { ...restaurantConfig.openingHours, ...openingHours };
+  }
+
+  if (payphone) {
+    restaurantConfig.payphone = {
+      enabled: payphone.enabled ?? true,
+      storeId: payphone.storeId || restaurantConfig.payphone?.storeId || '',
+      token: payphone.token || restaurantConfig.payphone?.token || '',
+      isSandbox: payphone.isSandbox ?? true
+    };
   }
 
   res.json({ success: true, data: restaurantConfig, message: 'Settings updated successfully.' });
