@@ -357,7 +357,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                 Enter the secret staff password to access menu management and system settings.
               </p>
               <p className="text-[11px] text-[#C23B22] font-semibold pt-1">
-                Default password: <code className="bg-red-50 px-1.5 py-0.5 rounded border border-red-200">admin123</code>
+                Default password: <button type="button" onClick={() => setPasswordInput('admin123')} className="bg-red-50 hover:bg-red-100 px-1.5 py-0.5 rounded border border-red-200 cursor-pointer underline font-mono text-xs">admin123</button> (click to fill)
               </p>
             </div>
 
