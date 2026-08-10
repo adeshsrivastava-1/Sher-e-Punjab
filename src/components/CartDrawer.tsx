@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
-import { X, Trash2, Plus, Minus, MapPin, Send, ShoppingBag, Sparkles, AlertCircle, Loader2, CreditCard, ShieldCheck } from 'lucide-react';
-import { CartItem, CustomerInfo, RestaurantConfig, PayphoneTransactionResult } from '../types';
-import { PayphonePaymentModal } from './PayphonePaymentModal';
+import { X, Trash2, Plus, Minus, MapPin, Send, ShoppingBag, Sparkles, AlertCircle, Loader2 } from 'lucide-react';
+import { CartItem, CustomerInfo, RestaurantConfig } from '../types';
 
 interface CartDrawerProps {
   isOpen: boolean;
@@ -30,9 +29,6 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
     locationLink: '',
     specialInstructions: ''
   });
-
-  const [paymentGateway, setPaymentGateway] = useState<'payphone' | 'cash'>('payphone');
-  const [isPayphoneModalOpen, setIsPayphoneModalOpen] = useState(false);
 
   const [isLocating, setIsLocating] = useState(false);
   const [locationStatus, setLocationStatus] = useState<string | null>(null);
@@ -71,8 +67,25 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
     );
   };
 
-  // Dispatch Order via WhatsApp (with optional Payphone payment voucher)
-  const dispatchWhatsAppOrder = (payphoneVoucher?: PayphoneTransactionResult) => {
+  // Dispatch Order via WhatsApp
+  const handleConfirmOrder = (e: React.FormEvent) => {
+    e.preventDefault();
+
+    if (cartItems.length === 0) {
+      alert('Your cart is empty.');
+      return;
+    }
+
+    if (!customer.fullName.trim() || !customer.phone.trim()) {
+      alert('Please provide your Full Name and WhatsApp Phone Number.');
+      return;
+    }
+
+    if (customer.orderType === 'delivery' && !customer.address.trim() && !customer.locationLink) {
+      alert('Please provide a delivery address or pin your GPS location.');
+      return;
+    }
+
     // Build Detailed Item Summary with Custom Options & Specific Customer Notes
     const itemSummary = cartItems
       .map(item => {
@@ -91,10 +104,6 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
       })
       .join('\n\n');
 
-    const paymentText = payphoneVoucher
-      ? `✅ PAID & VERIFIED VIA PAYPHONE ECUADOR\n• Payphone Auth Code: ${payphoneVoucher.authorizationCode}\n• Transaction ID: ${payphoneVoucher.clientTransactionId}\n• Tax ID / Document: ${payphoneVoucher.documentId || 'Included'}\n• Card: ${payphoneVoucher.cardBrand || 'Payphone Wallet'}`
-      : `💵 Payment Method: Cash / Card on Delivery`;
-
     // Build Exact Message Format
     const message = `*NEW ORDER - Sher E Punjab (Quito)*
 ----------------------------------
@@ -104,9 +113,6 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
 • Order Type: ${customer.orderType === 'delivery' ? 'Delivery' : 'Takeaway'}
 • Google Maps Location: ${customer.locationLink || 'Not Shared'}
 • Address Note: ${customer.address || 'N/A'}
-
-*Payment Details:*
-${paymentText}
 
 *Order & Dish Specifications:*
 ${itemSummary}
@@ -135,31 +141,6 @@ ${itemSummary}
     // Clear cart and close drawer
     onClearCart();
     onClose();
-  };
-
-  const handleConfirmOrder = (e: React.FormEvent) => {
-    e.preventDefault();
-
-    if (cartItems.length === 0) {
-      alert('Your cart is empty.');
-      return;
-    }
-
-    if (!customer.fullName.trim() || !customer.phone.trim()) {
-      alert('Please provide your Full Name and WhatsApp Phone Number.');
-      return;
-    }
-
-    if (customer.orderType === 'delivery' && !customer.address.trim() && !customer.locationLink) {
-      alert('Please provide a delivery address or pin your GPS location.');
-      return;
-    }
-
-    if (paymentGateway === 'payphone') {
-      setIsPayphoneModalOpen(true);
-    } else {
-      dispatchWhatsAppOrder();
-    }
   };
 
   return (
@@ -433,57 +414,6 @@ ${itemSummary}
                   />
                 </div>
 
-                {/* PAYMENT METHOD SELECTION */}
-                <div className="space-y-2 pt-2 border-t border-gray-200">
-                  <label className="block text-[11px] font-bold text-[#1C3A27] uppercase tracking-wider">
-                    Select Payment Method
-                  </label>
-
-                  <div className="grid grid-cols-2 gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setPaymentGateway('payphone')}
-                      className={`p-3 rounded-xl border text-left transition-all cursor-pointer relative overflow-hidden ${
-                        paymentGateway === 'payphone'
-                          ? 'border-[#FF5A00] bg-orange-50/80 shadow-xs'
-                          : 'border-gray-200 bg-[#FFFDF9] hover:border-gray-300'
-                      }`}
-                    >
-                      {paymentGateway === 'payphone' && (
-                        <div className="absolute top-0 right-0 w-3 h-3 bg-[#FF5A00] rounded-bl" />
-                      )}
-                      <div className="flex items-center gap-1.5 text-[#FF5A00] font-bold text-xs">
-                        <CreditCard className="w-4 h-4 shrink-0" />
-                        <span>Payphone Ecuador</span>
-                      </div>
-                      <p className="text-[10px] text-gray-600 mt-1">
-                        Visa, Mastercard, Diners or Payphone Wallet.
-                      </p>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => setPaymentGateway('cash')}
-                      className={`p-3 rounded-xl border text-left transition-all cursor-pointer relative overflow-hidden ${
-                        paymentGateway === 'cash'
-                          ? 'border-[#1C3A27] bg-green-50/80 shadow-xs'
-                          : 'border-gray-200 bg-[#FFFDF9] hover:border-gray-300'
-                      }`}
-                    >
-                      {paymentGateway === 'cash' && (
-                        <div className="absolute top-0 right-0 w-3 h-3 bg-[#1C3A27] rounded-bl" />
-                      )}
-                      <div className="flex items-center gap-1.5 text-[#1C3A27] font-bold text-xs">
-                        <Send className="w-4 h-4 shrink-0 text-green-600" />
-                        <span>Cash / Delivery</span>
-                      </div>
-                      <p className="text-[10px] text-gray-600 mt-1">
-                        Pay in cash or card upon driver arrival.
-                      </p>
-                    </button>
-                  </div>
-                </div>
-
                 {/* Itemized Pricing & Grand Total */}
                 <div className="pt-3 border-t border-gray-200 space-y-1.5 text-xs text-gray-600">
                   <div className="flex justify-between">
@@ -502,24 +432,14 @@ ${itemSummary}
                   </div>
                 </div>
 
-                {/* Confirm & Checkout Action Button */}
-                {paymentGateway === 'payphone' ? (
-                  <button
-                    type="submit"
-                    className="w-full py-3.5 rounded-xl bg-gradient-to-r from-[#FF5A00] to-[#E84D00] hover:from-[#E84D00] hover:to-[#C23B22] text-white font-bold text-sm shadow-lg flex items-center justify-center gap-2 active:scale-95 transition-all cursor-pointer"
-                  >
-                    <CreditCard className="w-4 h-4" />
-                    <span>Proceed to Payphone ($${grandTotal.toFixed(2)} USD)</span>
-                  </button>
-                ) : (
-                  <button
-                    type="submit"
-                    className="w-full py-3.5 rounded-xl bg-[#25D366] hover:bg-[#1EBE5B] text-white font-bold text-sm shadow-lg flex items-center justify-center gap-2 active:scale-95 transition-all cursor-pointer"
-                  >
-                    <Send className="w-4 h-4" />
-                    <span>Confirm & Order via WhatsApp</span>
-                  </button>
-                )}
+                {/* Confirm & Order via WhatsApp */}
+                <button
+                  type="submit"
+                  className="w-full py-3.5 rounded-xl bg-[#25D366] hover:bg-[#1EBE5B] text-white font-bold text-sm shadow-lg flex items-center justify-center gap-2 active:scale-95 transition-all cursor-pointer"
+                >
+                  <Send className="w-4 h-4" />
+                  <span>Confirm & Order via WhatsApp</span>
+                </button>
               </form>
             )}
 
@@ -527,16 +447,6 @@ ${itemSummary}
 
         </div>
       </div>
-
-      {/* Payphone Payment Modal */}
-      <PayphonePaymentModal
-        isOpen={isPayphoneModalOpen}
-        onClose={() => setIsPayphoneModalOpen(false)}
-        cartItems={cartItems}
-        customer={customer}
-        config={config}
-        onSuccessPayment={(result) => dispatchWhatsAppOrder(result)}
-      />
     </div>
   );
 };

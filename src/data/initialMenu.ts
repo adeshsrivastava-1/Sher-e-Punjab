@@ -10,12 +10,6 @@ export const INITIAL_RESTAURANT_CONFIG: RestaurantConfig = {
     weekdays: '12:00 PM - 10:30 PM',
     weekends: '12:00 PM - 11:30 PM',
   },
-  payphone: {
-    enabled: true,
-    storeId: process.env.PAYPHONE_STORE_ID || '',
-    token: process.env.PAYPHONE_TOKEN || '',
-    isSandbox: process.env.NODE_ENV !== 'production' || !process.env.PAYPHONE_TOKEN,
-  },
 };
 
 export const INITIAL_MENU_ITEMS: MenuItem[] = [

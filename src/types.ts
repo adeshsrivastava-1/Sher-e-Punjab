@@ -75,30 +75,6 @@ export interface RestaurantConfig {
     weekdays: string;
     weekends: string;
   };
-  payphone?: PayphoneConfig;
-}
-
-export interface PayphoneConfig {
-  enabled: boolean;
-  storeId?: string;
-  token?: string;
-  isSandbox: boolean;
-}
-
-export interface PayphoneTransactionResult {
-  transactionId: string;
-  clientTransactionId: string;
-  status: 'APPROVED' | 'PENDING' | 'REJECTED' | 'CANCELED';
-  authorizationCode?: string;
-  amount: number; // total in cents
-  tax: number; // tax in cents
-  currency: string;
-  cardBrand?: string;
-  lastDigits?: string;
-  phoneNumber?: string;
-  email?: string;
-  documentId?: string;
-  createdAt: string;
 }
 
 export interface ReservationData {
