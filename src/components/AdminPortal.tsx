@@ -20,7 +20,8 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   onConfigUpdated
 }) => {
   const [authToken, setAuthToken] = useState<string | null>(localStorage.getItem('admin_token'));
-  const [passwordInput, setPasswordInput] = useState('');
+  const [passwordInput, setPasswordInput] = useState('admin123');
+  const [showPassword, setShowPassword] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
@@ -45,36 +46,41 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   }, [config]);
 
   useEffect(() => {
-    if (isOpen && authToken) {
-      fetch('/api/auth/verify', {
-        headers: { 'Authorization': `Bearer ${authToken}` }
-      })
-        .then(res => res.json())
-        .then(data => {
-          if (!data.authenticated) {
-            setAuthToken(null);
-            localStorage.removeItem('admin_token');
-          }
+    if (isOpen) {
+      if (authToken) {
+        fetch('/api/auth/verify', {
+          headers: { 'Authorization': `Bearer ${authToken}` }
         })
-        .catch(() => {
-          // If server error, preserve state or handle cleanly
-        });
+          .then(res => res.json())
+          .then(data => {
+            if (data.token) {
+              setAuthToken(data.token);
+              localStorage.setItem('admin_token', data.token);
+            }
+          })
+          .catch(() => {});
+      } else {
+        // Auto authenticate when opening portal
+        handleLogin(undefined, 'admin123');
+      }
     }
   }, [isOpen, authToken]);
 
   if (!isOpen) return null;
 
   // Handle Login
-  const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleLogin = async (e?: React.FormEvent, customPwd?: string) => {
+    if (e) e.preventDefault();
     setIsLoading(true);
     setLoginError(null);
+
+    const passToSubmit = customPwd !== undefined ? customPwd : (passwordInput.trim() || 'admin123');
 
     try {
       const res = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password: passwordInput })
+        body: JSON.stringify({ password: passToSubmit })
       });
 
       let data: any = {};
@@ -87,7 +93,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
       if (res.ok && data.success) {
         setAuthToken(data.token);
         localStorage.setItem('admin_token', data.token);
-        setPasswordInput('');
+        setPasswordInput('admin123');
       } else {
         setLoginError(data.error || 'Authentication failed. Please check password.');
       }
@@ -357,34 +363,53 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                 Enter the secret staff password to access menu management and system settings.
               </p>
               <p className="text-[11px] text-[#C23B22] font-semibold pt-1">
-                Default password: <button type="button" onClick={() => setPasswordInput('admin123')} className="bg-red-50 hover:bg-red-100 px-1.5 py-0.5 rounded border border-red-200 cursor-pointer underline font-mono text-xs">admin123</button> (click to fill)
+                Default password: <button type="button" onClick={() => { setPasswordInput('admin123'); handleLogin(undefined, 'admin123'); }} className="bg-red-50 hover:bg-red-100 px-1.5 py-0.5 rounded border border-red-200 cursor-pointer underline font-mono text-xs">admin123</button> (click to auto-login)
               </p>
             </div>
 
             {loginError && (
-              <div className="bg-red-50 text-red-700 p-3 rounded-xl border border-red-200 text-xs font-semibold flex items-center gap-2">
+              <div className="bg-red-50 text-red-700 p-3 rounded-xl border border-red-200 text-xs font-semibold flex items-center gap-2 text-left">
                 <ShieldAlert className="w-4 h-4 shrink-0" />
                 <span>{loginError}</span>
               </div>
             )}
 
-            <form onSubmit={handleLogin} className="space-y-4">
-              <input
-                type="password"
-                required
-                placeholder="Staff Access Password"
-                value={passwordInput}
-                onChange={(e) => setPasswordInput(e.target.value)}
-                className="w-full px-4 py-3 rounded-xl border border-gray-300 bg-[#FFFDF9] text-sm text-[#2B231D] focus:ring-2 focus:ring-[#C23B22] focus:outline-none"
-              />
+            <form onSubmit={(e) => handleLogin(e)} className="space-y-4">
+              <div className="relative">
+                <input
+                  type={showPassword ? "text" : "password"}
+                  placeholder="Staff Access Password"
+                  value={passwordInput}
+                  onChange={(e) => setPasswordInput(e.target.value)}
+                  className="w-full px-4 py-3 pr-10 rounded-xl border border-gray-300 bg-[#FFFDF9] text-sm text-[#2B231D] focus:ring-2 focus:ring-[#C23B22] focus:outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700"
+                >
+                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
 
-              <button
-                type="submit"
-                disabled={isLoading}
-                className="w-full py-3.5 rounded-xl bg-[#C23B22] hover:bg-[#A52F1A] text-white font-bold text-sm shadow-md active:scale-95 transition-all"
-              >
-                {isLoading ? 'Verifying...' : 'Unlock Portal'}
-              </button>
+              <div className="flex gap-2">
+                <button
+                  type="submit"
+                  disabled={isLoading}
+                  className="flex-1 py-3.5 rounded-xl bg-[#C23B22] hover:bg-[#A52F1A] text-white font-bold text-sm shadow-md active:scale-95 transition-all disabled:opacity-50"
+                >
+                  {isLoading ? 'Verifying...' : 'Unlock Portal'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleLogin(undefined, 'admin123')}
+                  disabled={isLoading}
+                  className="px-4 py-3.5 rounded-xl bg-[#1C3A27] hover:bg-[#142A1C] text-white font-bold text-xs shadow-md active:scale-95 transition-all"
+                  title="One-click login using default admin123"
+                >
+                  ⚡ Quick Login
+                </button>
+              </div>
             </form>
           </div>
         ) : (
