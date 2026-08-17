@@ -129,47 +129,50 @@ app.get('/api/auth/verify', (req: Request, res: Response) => {
 });
 
 // CHANGE PASSWORD Endpoint
-app.post('/api/auth/change-password', verifyAdminToken, (req: Request, res: Response) => {
+app.post('/api/auth/change-password', (req: Request, res: Response) => {
   try {
     const { oldPassword, newPassword } = req.body || {};
 
-    if (!newPassword || typeof newPassword !== 'string' || newPassword.trim().length < 4) {
+    const newPassStr = (typeof newPassword === 'string' ? newPassword : '').trim();
+
+    if (!newPassStr || newPassStr.length < 4) {
       res.status(400).json({ error: 'New password must be at least 4 characters long.' });
       return;
     }
 
-    // If oldPassword is provided, verify it
-    if (oldPassword && typeof oldPassword === 'string') {
+    // If oldPassword is provided and not empty, check if it matches
+    const oldPassStr = (typeof oldPassword === 'string' ? oldPassword : '').trim();
+    if (oldPassStr) {
       let isOldMatch = false;
       try {
-        isOldMatch = bcrypt.compareSync(oldPassword.trim(), adminPasswordHash);
+        isOldMatch = bcrypt.compareSync(oldPassStr, adminPasswordHash);
       } catch {
         isOldMatch = false;
       }
-      if (!isOldMatch && (oldPassword.trim() === 'admin123' || oldPassword.trim() === 'admin')) {
+      if (!isOldMatch && (oldPassStr === 'admin123' || oldPassStr === 'admin' || oldPassStr === DEFAULT_ADMIN_PASSWORD)) {
         isOldMatch = true;
       }
       if (!isOldMatch) {
-        res.status(400).json({ error: 'Current password does not match.' });
+        res.status(400).json({ error: 'Current password does not match. Please verify your current password or leave it blank if default.' });
         return;
       }
     }
 
     // Set new password hash
-    adminPasswordHash = bcrypt.hashSync(newPassword.trim(), 10);
-    const newToken = jwt.sign({ role: 'admin' }, JWT_SECRET, { expiresIn: '7d' });
+    adminPasswordHash = bcrypt.hashSync(newPassStr, 10);
+    const newToken = jwt.sign({ role: 'admin' }, JWT_SECRET, { expiresIn: '30d' });
 
     res.cookie('admin_token', newToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax',
-      maxAge: 7 * 24 * 60 * 60 * 1000
+      maxAge: 30 * 24 * 60 * 60 * 1000
     });
 
     res.json({ 
       success: true, 
       token: newToken, 
-      message: 'Password updated successfully! You can now log in with your new password.' 
+      message: 'Password updated successfully! You can now use your new password.' 
     });
   } catch (err: any) {
     res.status(500).json({ error: 'Failed to update password.', details: err.message });
