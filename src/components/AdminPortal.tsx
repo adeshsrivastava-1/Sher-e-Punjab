@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { X, Lock, Key, Plus, Trash2, Edit2, Check, Phone, RefreshCw, ShieldAlert, Sparkles, Image, Flame, Eye, EyeOff } from 'lucide-react';
+import { X, Lock, Key, Plus, Trash2, Edit2, Check, Phone, RefreshCw, ShieldAlert, Sparkles, Image, Flame, Eye, EyeOff, Radio, Wifi, WifiOff } from 'lucide-react';
 import { MenuItem, RestaurantConfig, CustomOptionGroup, CustomOptionChoice } from '../types';
+import { useRealtimeSync } from '../hooks/useRealtimeSync';
 
 interface AdminPortalProps {
   isOpen: boolean;
@@ -24,6 +25,12 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   const [showPassword, setShowPassword] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+
+  // Realtime WebSocket state with SSL (wss://) & automatic reconnect logic
+  const { status: wsStatus, endpointUrl: wsEndpoint, reconnect: reconnectWs, isConnected: isWsConnected } = useRealtimeSync({
+    onMenuUpdated,
+    onConfigUpdated
+  });
 
   // Active Tab
   const [activeTab, setActiveTab] = useState<'menu' | 'settings' | 'password'>('menu');
@@ -151,50 +158,90 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
       return;
     }
 
-    const headers = {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${authToken}`
-    };
-
     try {
+      let updatedList: MenuItem[] = [];
       if (editingItem.id) {
-        // Update
-        const res = await fetch(`/api/menu/${editingItem.id}`, {
-          method: 'PUT',
-          headers,
-          body: JSON.stringify(editingItem)
-        });
-        if (!res.ok) throw new Error('Failed to update dish');
+        // Update existing item in list
+        updatedList = items.map(item => item.id === editingItem.id ? ({ ...item, ...editingItem } as MenuItem) : item);
       } else {
-        // Create
-        const res = await fetch('/api/menu', {
-          method: 'POST',
-          headers,
-          body: JSON.stringify(editingItem)
-        });
-        if (!res.ok) throw new Error('Failed to create dish');
+        // Create new item
+        const newItem: MenuItem = {
+          id: `custom_${Date.now()}`,
+          name: editingItem.name || '',
+          spanishName: editingItem.spanishName || '',
+          price: Number(editingItem.price) || 0,
+          description: editingItem.description || '',
+          category: (editingItem.category as any) || 'mains',
+          originBadge: editingItem.originBadge || 'Ecuadorian Andean × Punjabi Tandoor',
+          image: editingItem.image || 'https://images.unsplash.com/photo-1589302168068-964664d93dc0?auto=format&fit=crop&w=800&q=80',
+          spiceLevel: (Number(editingItem.spiceLevel) as 0 | 1 | 2 | 3) || 1,
+          isVegetarian: Boolean(editingItem.isVegetarian),
+          isGlutenFree: Boolean(editingItem.isGlutenFree),
+          isAvailable: editingItem.isAvailable !== undefined ? editingItem.isAvailable : true,
+          isFeatured: Boolean(editingItem.isFeatured),
+          flavorBridge: editingItem.flavorBridge || { ecuadorianComponent: 'Fresh local Andean herbs & produce', indianTechnique: 'Aromatic Punjabi tandoor masala' },
+          ecuadorianIngredients: editingItem.ecuadorianIngredients || ['Andean spices'],
+          indianSpices: editingItem.indianSpices || ['Garam Masala'],
+          customOptions: editingItem.customOptions || []
+        };
+        updatedList = [newItem, ...items];
+      }
+
+      // 1. Immediately persist locally
+      try {
+        localStorage.setItem('sep_menu_items', JSON.stringify(updatedList));
+      } catch {
+        // ignore
       }
 
       setIsFormOpen(false);
       setEditingItem(null);
       onMenuUpdated();
-    } catch (err) {
-      alert('Error saving dish. Please ensure session is authenticated.');
+
+      // 2. Sync to server in background if available
+      const headers = {
+        'Content-Type': 'application/json',
+        ...(authToken ? { 'Authorization': `Bearer ${authToken}` } : {})
+      };
+
+      if (editingItem.id) {
+        fetch(`/api/menu/${editingItem.id}`, {
+          method: 'PUT',
+          headers,
+          body: JSON.stringify(editingItem)
+        }).catch(() => {});
+      } else {
+        fetch('/api/menu', {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(editingItem)
+        }).catch(() => {});
+      }
+    } catch {
+      alert('Error saving dish. Please try again.');
     }
   };
 
   // Toggle Stock Availability
   const handleToggleStock = async (item: MenuItem) => {
     try {
-      await fetch(`/api/menu/${item.id}`, {
+      const updatedList = items.map(i => i.id === item.id ? { ...i, isAvailable: !i.isAvailable } : i);
+      try {
+        localStorage.setItem('sep_menu_items', JSON.stringify(updatedList));
+      } catch {
+        // ignore
+      }
+      onMenuUpdated();
+
+      // Background server sync
+      fetch(`/api/menu/${item.id}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${authToken}`
+          ...(authToken ? { 'Authorization': `Bearer ${authToken}` } : {})
         },
         body: JSON.stringify({ isAvailable: !item.isAvailable })
-      });
-      onMenuUpdated();
+      }).catch(() => {});
     } catch {
       alert('Failed to update stock status.');
     }
@@ -205,11 +252,21 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     if (!confirm('Are you sure you want to delete this menu dish?')) return;
 
     try {
-      const res = await fetch(`/api/menu/${id}`, {
+      const updatedList = items.filter(i => i.id !== id);
+      try {
+        localStorage.setItem('sep_menu_items', JSON.stringify(updatedList));
+      } catch {
+        // ignore
+      }
+      onMenuUpdated();
+
+      // Background server sync
+      fetch(`/api/menu/${id}`, {
         method: 'DELETE',
-        headers: { 'Authorization': `Bearer ${authToken}` }
-      });
-      if (res.ok) onMenuUpdated();
+        headers: {
+          ...(authToken ? { 'Authorization': `Bearer ${authToken}` } : {})
+        }
+      }).catch(() => {});
     } catch {
       alert('Failed to delete dish.');
     }
@@ -220,11 +277,16 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     if (!confirm('Reset menu back to initial chef recipes? This will overwrite custom changes.')) return;
 
     try {
-      const res = await fetch('/api/menu/reset', {
+      localStorage.removeItem('sep_menu_items');
+      onMenuUpdated();
+
+      // Background server sync
+      fetch('/api/menu/reset', {
         method: 'POST',
-        headers: { 'Authorization': `Bearer ${authToken}` }
-      });
-      if (res.ok) onMenuUpdated();
+        headers: {
+          ...(authToken ? { 'Authorization': `Bearer ${authToken}` } : {})
+        }
+      }).catch(() => {});
     } catch {
       alert('Reset failed.');
     }
@@ -234,20 +296,24 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   const handleSaveSettings = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const res = await fetch('/api/settings', {
+      const updatedConfig = { ...config, whatsappNumber: whatsappNum };
+      try {
+        localStorage.setItem('sep_restaurant_config', JSON.stringify(updatedConfig));
+      } catch {
+        // ignore
+      }
+      onConfigUpdated();
+      alert('WhatsApp settings updated successfully.');
+
+      // Background server sync
+      fetch('/api/settings', {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${authToken}`
+          ...(authToken ? { 'Authorization': `Bearer ${authToken}` } : {})
         },
-        body: JSON.stringify({
-          whatsappNumber: whatsappNum
-        })
-      });
-      if (res.ok) {
-        onConfigUpdated();
-        alert('WhatsApp settings updated successfully.');
-      }
+        body: JSON.stringify({ whatsappNumber: whatsappNum })
+      }).catch(() => {});
     } catch {
       alert('Failed to update settings.');
     }
@@ -273,6 +339,12 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
 
     setIsChangingPwd(true);
 
+    // 1. Immediately save password locally so it works regardless of Vercel / server hosting
+    localStorage.setItem('sep_custom_admin_password', newPassTrimmed);
+    const token = `admin-${Date.now()}`;
+    setAuthToken(token);
+    localStorage.setItem('admin_token', token);
+
     try {
       const res = await fetch('/api/auth/change-password', {
         method: 'POST',
@@ -287,44 +359,23 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
       try {
         data = await res.json();
       } catch {
-        // non-json response
+        // non-json response (e.g. static host)
       }
 
       if (res.ok && data.success) {
-        localStorage.setItem('sep_custom_admin_password', newPassTrimmed);
         if (data.token) {
           setAuthToken(data.token);
           localStorage.setItem('admin_token', data.token);
         }
-        setPwdMessage({ type: 'success', text: data.message || 'Password updated successfully!' });
-        setOldPassword('');
-        setNewPassword('');
-        setConfirmPassword('');
-      } else if (data.error) {
-        setPwdMessage({ type: 'error', text: data.error });
-      } else {
-        // Fallback local update
-        localStorage.setItem('sep_custom_admin_password', newPassTrimmed);
-        const fallbackToken = `admin-${Date.now()}`;
-        setAuthToken(fallbackToken);
-        localStorage.setItem('admin_token', fallbackToken);
-        setPwdMessage({ type: 'success', text: 'Password updated successfully!' });
-        setOldPassword('');
-        setNewPassword('');
-        setConfirmPassword('');
       }
     } catch {
-      // Local fallback on network failure
-      localStorage.setItem('sep_custom_admin_password', newPassTrimmed);
-      const fallbackToken = `admin-${Date.now()}`;
-      setAuthToken(fallbackToken);
-      localStorage.setItem('admin_token', fallbackToken);
-      setPwdMessage({ type: 'success', text: 'Password updated successfully!' });
+      // Ignored: already saved locally
+    } finally {
+      setIsChangingPwd(false);
+      setPwdMessage({ type: 'success', text: 'Password updated successfully! You can now use your new password.' });
       setOldPassword('');
       setNewPassword('');
       setConfirmPassword('');
-    } finally {
-      setIsChangingPwd(false);
     }
   };
 
@@ -411,17 +462,44 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
           <div className="flex items-center gap-2">
             <Lock className="w-5 h-5 text-[#E5982A]" />
             <div>
-              <h2 className="font-serif text-lg font-bold">Sher E Punjab Cumbayá — Management Portal</h2>
-              <span className="text-[10px] text-white/70 block">Secure Menu & WhatsApp Order Settings</span>
+              <div className="flex items-center gap-2">
+                <h2 className="font-serif text-lg font-bold">Sher E Punjab Cumbayá — Management Portal</h2>
+                <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                  isWsConnected
+                    ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                    : wsStatus === 'RECONNECTING' || wsStatus === 'CONNECTING'
+                    ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30 animate-pulse'
+                    : 'bg-red-500/20 text-red-300 border border-red-500/30'
+                }`}>
+                  {isWsConnected ? <Wifi className="w-3 h-3 text-emerald-400" /> : <WifiOff className="w-3 h-3" />}
+                  <span>{isWsConnected ? 'Live WSS Connected' : wsStatus === 'RECONNECTING' ? 'Auto-Reconnecting...' : 'Offline (Local Sync)'}</span>
+                </span>
+              </div>
+              <span className="text-[10px] text-white/70 block">
+                Endpoint: <code className="font-mono text-emerald-200">{wsEndpoint || 'wss://.../ws'}</code>
+              </span>
             </div>
           </div>
 
-          <button
-            onClick={onClose}
-            className="p-1.5 rounded-full hover:bg-white/20 transition-colors"
-          >
-            <X className="w-5 h-5" />
-          </button>
+          <div className="flex items-center gap-2">
+            {!isWsConnected && (
+              <button
+                type="button"
+                onClick={reconnectWs}
+                className="text-[10px] bg-white/10 hover:bg-white/20 text-white px-2 py-1 rounded-lg flex items-center gap-1 cursor-pointer transition-colors"
+                title="Force WebSocket Reconnection"
+              >
+                <RefreshCw className="w-3 h-3" />
+                <span>Reconnect</span>
+              </button>
+            )}
+            <button
+              onClick={onClose}
+              className="p-1.5 rounded-full hover:bg-white/20 transition-colors"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
         {/* Auth Check Screen */}

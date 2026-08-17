@@ -9,6 +9,7 @@ import { Footer } from './components/Footer';
 
 import { MenuItem, CartItem, RestaurantConfig, SelectedOptionSelection } from './types';
 import { INITIAL_MENU_ITEMS, INITIAL_RESTAURANT_CONFIG } from './data/initialMenu';
+import { useRealtimeSync } from './hooks/useRealtimeSync';
 
 // Lazy-loaded heavy components (loaded on-demand when modals/drawers open)
 const DishDetailModal = lazy(() => import('./components/DishDetailModal').then(m => ({ default: m.DishDetailModal })));
@@ -18,8 +19,31 @@ const CartDrawer = lazy(() => import('./components/CartDrawer').then(m => ({ def
 const AdminPortal = lazy(() => import('./components/AdminPortal').then(m => ({ default: m.AdminPortal })));
 
 export default function App() {
-  const [menuItems, setMenuItems] = useState<MenuItem[]>(INITIAL_MENU_ITEMS);
-  const [restaurantConfig, setRestaurantConfig] = useState<RestaurantConfig>(INITIAL_RESTAURANT_CONFIG);
+  const [menuItems, setMenuItems] = useState<MenuItem[]>(() => {
+    try {
+      const saved = localStorage.getItem('sep_menu_items');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch {
+      // ignore
+    }
+    return INITIAL_MENU_ITEMS;
+  });
+
+  const [restaurantConfig, setRestaurantConfig] = useState<RestaurantConfig>(() => {
+    try {
+      const saved = localStorage.getItem('sep_restaurant_config');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed && typeof parsed === 'object') return { ...INITIAL_RESTAURANT_CONFIG, ...parsed };
+      }
+    } catch {
+      // ignore
+    }
+    return INITIAL_RESTAURANT_CONFIG;
+  });
 
   // Cart State with isolated per-session LocalStorage & SessionStorage fallback
   const [cartItems, setCartItems] = useState<CartItem[]>(() => {
@@ -81,10 +105,28 @@ export default function App() {
         const json = await res.json();
         if (json.success && Array.isArray(json.data)) {
           setMenuItems(json.data);
+          try {
+            localStorage.setItem('sep_menu_items', JSON.stringify(json.data));
+          } catch {
+            // ignore
+          }
+          return;
         }
       }
-    } catch (err) {
-      console.warn('Using default menu data:', err);
+    } catch {
+      // serverless/offline fallback
+    }
+
+    try {
+      const saved = localStorage.getItem('sep_menu_items');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setMenuItems(parsed);
+        }
+      }
+    } catch {
+      // ignore
     }
   }, []);
 
@@ -96,10 +138,28 @@ export default function App() {
         const json = await res.json();
         if (json.success && json.data) {
           setRestaurantConfig(json.data);
+          try {
+            localStorage.setItem('sep_restaurant_config', JSON.stringify(json.data));
+          } catch {
+            // ignore
+          }
+          return;
         }
       }
-    } catch (err) {
-      console.warn('Using default config:', err);
+    } catch {
+      // serverless/offline fallback
+    }
+
+    try {
+      const saved = localStorage.getItem('sep_restaurant_config');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed && typeof parsed === 'object') {
+          setRestaurantConfig((prev) => ({ ...prev, ...parsed }));
+        }
+      }
+    } catch {
+      // ignore
     }
   }, []);
 
@@ -107,6 +167,12 @@ export default function App() {
     fetchMenu();
     fetchConfig();
   }, [fetchMenu, fetchConfig]);
+
+  // Live WebSocket synchronization with SSL auto-negotiation (wss://) & exponential backoff reconnect
+  useRealtimeSync({
+    onMenuUpdated: fetchMenu,
+    onConfigUpdated: fetchConfig
+  });
 
   // Cart Management Handlers
   const handleAddToCart = (

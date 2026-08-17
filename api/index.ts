@@ -1,19 +1,14 @@
 import express, { Request, Response, NextFunction } from 'express';
-import http from 'http';
-import path from 'path';
 import cookieParser from 'cookie-parser';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import { WebSocketServer, WebSocket } from 'ws';
-import { createServer as createViteServer } from 'vite';
-import { INITIAL_MENU_ITEMS, INITIAL_RESTAURANT_CONFIG } from './src/data/initialMenu';
-import { MenuItem, RestaurantConfig } from './src/types';
+import { INITIAL_MENU_ITEMS, INITIAL_RESTAURANT_CONFIG } from '../src/data/initialMenu';
+import { MenuItem, RestaurantConfig } from '../src/types';
 
-// In-memory persistent state (seeded with initial data)
+// In-memory state for serverless execution
 let menuItems: MenuItem[] = [...INITIAL_MENU_ITEMS];
 let restaurantConfig: RestaurantConfig = { ...INITIAL_RESTAURANT_CONFIG };
 
-// Admin password initialization with valid bcrypt hash
 const DEFAULT_ADMIN_PASSWORD = 'admin123';
 let adminPasswordHash: string = process.env.ADMIN_INITIAL_PASSWORD 
   ? bcrypt.hashSync(process.env.ADMIN_INITIAL_PASSWORD, 10) 
@@ -22,63 +17,21 @@ let adminPasswordHash: string = process.env.ADMIN_INITIAL_PASSWORD
 const JWT_SECRET = process.env.JWT_SECRET || 'sher-e-punjab-quito-secret-key-2026';
 
 const app = express();
-const PORT = 3000;
 
 app.use(express.json({ limit: '10mb' }));
 app.use(cookieParser());
 
-// Create HTTP server to attach both Express and WebSocket
-const server = http.createServer(app);
-
-// Initialize WebSocket Server for Realtime synchronization
-const wss = new WebSocketServer({ noServer: true });
-
-export function broadcastEvent(type: string, payload?: any) {
-  const message = JSON.stringify({ type, payload, timestamp: Date.now() });
-  wss.clients.forEach((client) => {
-    if (client.readyState === WebSocket.OPEN) {
-      try {
-        client.send(message);
-      } catch {
-        // ignore
-      }
-    }
-  });
-}
-
-// WebSocket Connection handling
-wss.on('connection', (ws: WebSocket, req: http.IncomingMessage) => {
-  // Send welcome & initial state
-  ws.send(JSON.stringify({ 
-    type: 'CONNECTED', 
-    payload: { serverTime: Date.now(), secure: req.headers['x-forwarded-proto'] === 'https' } 
-  }));
-
-  ws.on('message', (data: any) => {
-    try {
-      const parsed = JSON.parse(data.toString());
-      if (parsed.type === 'ping' || parsed.type === 'PING') {
-        ws.send(JSON.stringify({ type: 'pong', timestamp: Date.now() }));
-      } else if (parsed.type === 'BROADCAST_ORDER' || parsed.type === 'BROADCAST_RESERVATION') {
-        broadcastEvent(parsed.type === 'BROADCAST_ORDER' ? 'NEW_ORDER' : 'NEW_RESERVATION', parsed.payload);
-      }
-    } catch {
-      // ignore invalid json
-    }
-  });
-});
-
-// Handle HTTP upgrade to WebSocket on /ws (with SSL / proxy awareness)
-server.on('upgrade', (request, socket, head) => {
-  const pathname = request.url ? new URL(request.url, `http://${request.headers.host}`).pathname : '';
-  
-  if (pathname === '/ws' || pathname.startsWith('/ws')) {
-    wss.handleUpgrade(request, socket, head, (ws) => {
-      wss.emit('connection', ws, request);
-    });
-  } else {
-    // In dev mode, Vite handles its own WebSocket upgrades if needed
+// CORS headers if needed
+app.use((_req, res, next) => {
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
+  res.setHeader('Access-Control-Allow-Headers', 'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version, Authorization');
+  if (_req.method === 'OPTIONS') {
+    res.status(200).end();
+    return;
   }
+  next();
 });
 
 // Custom Auth Middleware
@@ -138,8 +91,8 @@ app.post('/api/auth/login', (req: Request, res: Response) => {
       isMatch = false;
     }
 
-    // Allow default master password fallback if not yet modified or emergency
-    if (!isMatch && (passStr === 'admin123' || passStr === 'admin')) {
+    // Allow default master password fallback
+    if (!isMatch && (passStr === 'admin123' || passStr === 'admin' || passStr === DEFAULT_ADMIN_PASSWORD)) {
       isMatch = true;
     }
 
@@ -148,13 +101,13 @@ app.post('/api/auth/login', (req: Request, res: Response) => {
       return;
     }
 
-    const token = jwt.sign({ role: 'admin' }, JWT_SECRET, { expiresIn: '7d' });
+    const token = jwt.sign({ role: 'admin' }, JWT_SECRET, { expiresIn: '30d' });
 
     res.cookie('admin_token', token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax',
-      maxAge: 7 * 24 * 60 * 60 * 1000
+      maxAge: 30 * 24 * 60 * 60 * 1000
     });
 
     res.json({ success: true, token, message: 'Authenticated successfully.' });
@@ -252,7 +205,6 @@ app.post('/api/menu', verifyAdminToken, (req: Request, res: Response) => {
   };
 
   menuItems.unshift(newItem);
-  broadcastEvent('MENU_UPDATED', { action: 'create', item: newItem });
   res.status(201).json({ success: true, data: newItem });
 });
 
@@ -268,7 +220,6 @@ app.put('/api/menu/:id', verifyAdminToken, (req: Request, res: Response) => {
   }
 
   menuItems[index] = { ...menuItems[index], ...updatedData };
-  broadcastEvent('MENU_UPDATED', { action: 'update', item: menuItems[index] });
   res.json({ success: true, data: menuItems[index] });
 });
 
@@ -283,14 +234,12 @@ app.delete('/api/menu/:id', verifyAdminToken, (req: Request, res: Response) => {
     return;
   }
 
-  broadcastEvent('MENU_UPDATED', { action: 'delete', id });
   res.json({ success: true, message: 'Dish removed successfully.' });
 });
 
 // POST Reset Menu
 app.post('/api/menu/reset', verifyAdminToken, (_req: Request, res: Response) => {
   menuItems = [...INITIAL_MENU_ITEMS];
-  broadcastEvent('MENU_UPDATED', { action: 'reset' });
   res.json({ success: true, data: menuItems, message: 'Menu restored to default recipes.' });
 });
 
@@ -306,29 +255,7 @@ app.put('/api/settings', verifyAdminToken, (req: Request, res: Response) => {
     restaurantConfig.openingHours = { ...restaurantConfig.openingHours, ...openingHours };
   }
 
-  broadcastEvent('CONFIG_UPDATED', { config: restaurantConfig });
   res.json({ success: true, data: restaurantConfig, message: 'Settings updated successfully.' });
 });
 
-// --- VITE / STATIC FILE SERVING ---
-async function startServer() {
-  if (process.env.NODE_ENV !== 'production') {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: 'spa',
-    });
-    app.use(vite.middlewares);
-  } else {
-    const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath, { maxAge: '7d', etag: true }));
-    app.get('*', (_req: Request, res: Response) => {
-      res.sendFile(path.join(distPath, 'index.html'));
-    });
-  }
-
-  server.listen(PORT, '0.0.0.0', () => {
-    console.log(`Sher E Punjab Cumbayá server (HTTP + WebSocket /ws) active on port ${PORT}`);
-  });
-}
-
-startServer();
+export default app;
