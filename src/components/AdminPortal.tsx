@@ -20,7 +20,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   onConfigUpdated
 }) => {
   const [authToken, setAuthToken] = useState<string | null>(localStorage.getItem('admin_token'));
-  const [passwordInput, setPasswordInput] = useState('admin123');
+  const [passwordInput, setPasswordInput] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -39,31 +39,27 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   const [oldPassword, setOldPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [showNewPwd, setShowNewPwd] = useState(false);
   const [pwdMessage, setPwdMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [isChangingPwd, setIsChangingPwd] = useState(false);
 
   useEffect(() => {
     setWhatsappNum(config.whatsappNumber);
   }, [config]);
 
   useEffect(() => {
-    if (isOpen) {
-      if (!authToken) {
-        handleLogin(undefined, 'admin123');
-      } else {
-        fetch('/api/auth/verify', {
-          headers: { 'Authorization': `Bearer ${authToken}` }
+    if (isOpen && authToken) {
+      fetch('/api/auth/verify', {
+        headers: { 'Authorization': `Bearer ${authToken}` }
+      })
+        .then(res => res.json())
+        .then(data => {
+          if (!data.authenticated) {
+            setAuthToken(null);
+            localStorage.removeItem('admin_token');
+          }
         })
-          .then(res => res.json())
-          .then(data => {
-            if (data.token) {
-              setAuthToken(data.token);
-              localStorage.setItem('admin_token', data.token);
-            }
-          })
-          .catch(() => {
-            // Keep existing authToken session on error
-          });
-      }
+        .catch(() => {});
     }
   }, [isOpen]);
 
@@ -75,7 +71,13 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     setIsLoading(true);
     setLoginError(null);
 
-    const passToSubmit = customPwd !== undefined ? customPwd : (passwordInput.trim() || 'admin123');
+    const passToSubmit = customPwd !== undefined ? customPwd : passwordInput.trim();
+
+    if (!passToSubmit) {
+      setLoginError('Please enter a password.');
+      setIsLoading(false);
+      return;
+    }
 
     try {
       const res = await fetch('/api/auth/login', {
@@ -84,20 +86,17 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
         body: JSON.stringify({ password: passToSubmit })
       });
 
-      let data: any = {};
-      try {
-        data = await res.json();
-      } catch {
-        // Fallback
-      }
+      const data = await res.json();
 
-      const token = data.token || 'admin-session-active';
-      setAuthToken(token);
-      localStorage.setItem('admin_token', token);
-      setPasswordInput('admin123');
+      if (res.ok && data.success) {
+        setAuthToken(data.token);
+        localStorage.setItem('admin_token', data.token);
+        setPasswordInput('');
+      } else {
+        setLoginError(data.error || 'Authentication failed. Please check password.');
+      }
     } catch {
-      setAuthToken('admin-session-active');
-      localStorage.setItem('admin_token', 'admin-session-active');
+      setLoginError('Unable to connect to authentication server.');
     } finally {
       setIsLoading(false);
     }
@@ -229,6 +228,13 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
       return;
     }
 
+    if (newPassword.trim().length < 4) {
+      setPwdMessage({ type: 'error', text: 'New password must be at least 4 characters long.' });
+      return;
+    }
+
+    setIsChangingPwd(true);
+
     try {
       const res = await fetch('/api/auth/change-password', {
         method: 'POST',
@@ -236,12 +242,16 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${authToken}`
         },
-        body: JSON.stringify({ oldPassword, newPassword })
+        body: JSON.stringify({ oldPassword: oldPassword.trim(), newPassword: newPassword.trim() })
       });
 
       const data = await res.json();
       if (res.ok && data.success) {
-        setPwdMessage({ type: 'success', text: 'Password updated successfully!' });
+        setPwdMessage({ type: 'success', text: data.message || 'Password updated successfully!' });
+        if (data.token) {
+          setAuthToken(data.token);
+          localStorage.setItem('admin_token', data.token);
+        }
         setOldPassword('');
         setNewPassword('');
         setConfirmPassword('');
@@ -249,7 +259,9 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
         setPwdMessage({ type: 'error', text: data.error || 'Failed to change password.' });
       }
     } catch {
-      setPwdMessage({ type: 'error', text: 'Server connection failed.' });
+      setPwdMessage({ type: 'error', text: 'Server connection failed. Please try again.' });
+    } finally {
+      setIsChangingPwd(false);
     }
   };
 
@@ -881,10 +893,12 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
             {/* TAB 3: PASSWORD RESET */}
             {activeTab === 'password' && (
               <form onSubmit={handleChangePassword} className="space-y-4 max-w-md">
-                <h3 className="font-serif text-xl font-bold text-[#1C3A27]">Reset Portal Password</h3>
-                <p className="text-xs text-[#6B5E54]">
-                  Update staff credentials. Passwords are securely hashed on the backend.
-                </p>
+                <div>
+                  <h3 className="font-serif text-xl font-bold text-[#1C3A27]">Reset Portal Password</h3>
+                  <p className="text-xs text-[#6B5E54] mt-1">
+                    Update staff credentials. Passwords are securely hashed on the server with bcrypt.
+                  </p>
+                </div>
 
                 {pwdMessage && (
                   <div
@@ -899,45 +913,64 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                 )}
 
                 <div>
-                  <label className="block text-xs font-semibold mb-1">Current Password *</label>
+                  <label className="block text-xs font-semibold mb-1 text-[#2B231D]">
+                    Current Password <span className="text-gray-400 font-normal">(optional if default admin123)</span>
+                  </label>
                   <input
                     type="password"
-                    required
+                    placeholder="Enter current password (or admin123)"
                     value={oldPassword}
                     onChange={(e) => setOldPassword(e.target.value)}
-                    className="w-full px-4 py-2 border rounded-xl bg-white text-sm"
+                    className="w-full px-4 py-2.5 border border-gray-300 rounded-xl bg-white text-sm text-[#2B231D] focus:ring-2 focus:ring-[#C23B22] focus:outline-none"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold mb-1">New Password *</label>
-                  <input
-                    type="password"
-                    required
-                    minLength={6}
-                    value={newPassword}
-                    onChange={(e) => setNewPassword(e.target.value)}
-                    className="w-full px-4 py-2 border rounded-xl bg-white text-sm"
-                  />
+                  <label className="block text-xs font-semibold mb-1 text-[#2B231D]">
+                    New Password * <span className="text-gray-400 font-normal">(min 4 characters)</span>
+                  </label>
+                  <div className="relative">
+                    <input
+                      type={showNewPwd ? "text" : "password"}
+                      required
+                      minLength={4}
+                      placeholder="Enter new strong password"
+                      value={newPassword}
+                      onChange={(e) => setNewPassword(e.target.value)}
+                      className="w-full px-4 py-2.5 pr-10 border border-gray-300 rounded-xl bg-white text-sm text-[#2B231D] focus:ring-2 focus:ring-[#C23B22] focus:outline-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowNewPwd(!showNewPwd)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700"
+                    >
+                      {showNewPwd ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold mb-1">Confirm New Password *</label>
+                  <label className="block text-xs font-semibold mb-1 text-[#2B231D]">Confirm New Password *</label>
                   <input
-                    type="password"
+                    type={showNewPwd ? "text" : "password"}
                     required
+                    minLength={4}
+                    placeholder="Repeat new password"
                     value={confirmPassword}
                     onChange={(e) => setConfirmPassword(e.target.value)}
-                    className="w-full px-4 py-2 border rounded-xl bg-white text-sm"
+                    className="w-full px-4 py-2.5 border border-gray-300 rounded-xl bg-white text-sm text-[#2B231D] focus:ring-2 focus:ring-[#C23B22] focus:outline-none"
                   />
                 </div>
 
-                <button
-                  type="submit"
-                  className="px-5 py-2.5 rounded-xl bg-[#C23B22] text-white font-bold text-xs shadow-md"
-                >
-                  Save New Password
-                </button>
+                <div className="pt-2">
+                  <button
+                    type="submit"
+                    disabled={isChangingPwd}
+                    className="px-6 py-3 rounded-xl bg-[#C23B22] hover:bg-[#A52F1A] text-white font-bold text-xs shadow-md active:scale-95 transition-all disabled:opacity-50"
+                  >
+                    {isChangingPwd ? 'Updating Password...' : 'Save New Password'}
+                  </button>
+                </div>
               </form>
             )}
 

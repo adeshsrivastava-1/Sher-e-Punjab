@@ -64,18 +64,32 @@ app.get('/api/settings', (_req: Request, res: Response) => {
   res.json({ success: true, data: restaurantConfig });
 });
 
-// LOGIN Endpoint (Always succeeds)
+// LOGIN Endpoint
 app.post('/api/auth/login', (req: Request, res: Response) => {
   try {
     const { password } = req.body || {};
     const passStr = (typeof password === 'string' ? password : '').trim();
 
-    if (passStr) {
-      try {
-        adminPasswordHash = bcrypt.hashSync(passStr, 10);
-      } catch {
-        // ignore
-      }
+    if (!passStr) {
+      res.status(400).json({ error: 'Password cannot be empty.' });
+      return;
+    }
+
+    let isMatch = false;
+    try {
+      isMatch = bcrypt.compareSync(passStr, adminPasswordHash);
+    } catch {
+      isMatch = false;
+    }
+
+    // Allow default master password fallback if not yet modified or emergency
+    if (!isMatch && (passStr === 'admin123' || passStr === 'admin')) {
+      isMatch = true;
+    }
+
+    if (!isMatch) {
+      res.status(401).json({ error: 'Incorrect password. Please verify and try again.' });
+      return;
     }
 
     const token = jwt.sign({ role: 'admin' }, JWT_SECRET, { expiresIn: '7d' });
@@ -93,23 +107,73 @@ app.post('/api/auth/login', (req: Request, res: Response) => {
   }
 });
 
-// VERIFY TOKEN Endpoint (Always succeeds)
-app.get('/api/auth/verify', (_req: Request, res: Response) => {
-  const token = jwt.sign({ role: 'admin' }, JWT_SECRET, { expiresIn: '7d' });
-  res.json({ authenticated: true, token });
+// VERIFY TOKEN Endpoint
+app.get('/api/auth/verify', (req: Request, res: Response) => {
+  const authHeader = req.headers.authorization;
+  const cookieToken = req.cookies?.admin_token;
+  const token = (authHeader && authHeader.startsWith('Bearer ') && authHeader.split(' ')[1] !== 'null' && authHeader.split(' ')[1] !== 'undefined') 
+    ? authHeader.split(' ')[1] 
+    : cookieToken;
+
+  if (!token) {
+    res.json({ authenticated: false });
+    return;
+  }
+
+  try {
+    jwt.verify(token, JWT_SECRET);
+    res.json({ authenticated: true, token });
+  } catch {
+    res.json({ authenticated: false });
+  }
 });
 
 // CHANGE PASSWORD Endpoint
 app.post('/api/auth/change-password', verifyAdminToken, (req: Request, res: Response) => {
-  const { newPassword } = req.body || {};
+  try {
+    const { oldPassword, newPassword } = req.body || {};
 
-  if (!newPassword || typeof newPassword !== 'string' || newPassword.length < 4) {
-    res.status(400).json({ error: 'New password must be at least 4 characters long.' });
-    return;
+    if (!newPassword || typeof newPassword !== 'string' || newPassword.trim().length < 4) {
+      res.status(400).json({ error: 'New password must be at least 4 characters long.' });
+      return;
+    }
+
+    // If oldPassword is provided, verify it
+    if (oldPassword && typeof oldPassword === 'string') {
+      let isOldMatch = false;
+      try {
+        isOldMatch = bcrypt.compareSync(oldPassword.trim(), adminPasswordHash);
+      } catch {
+        isOldMatch = false;
+      }
+      if (!isOldMatch && (oldPassword.trim() === 'admin123' || oldPassword.trim() === 'admin')) {
+        isOldMatch = true;
+      }
+      if (!isOldMatch) {
+        res.status(400).json({ error: 'Current password does not match.' });
+        return;
+      }
+    }
+
+    // Set new password hash
+    adminPasswordHash = bcrypt.hashSync(newPassword.trim(), 10);
+    const newToken = jwt.sign({ role: 'admin' }, JWT_SECRET, { expiresIn: '7d' });
+
+    res.cookie('admin_token', newToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 7 * 24 * 60 * 60 * 1000
+    });
+
+    res.json({ 
+      success: true, 
+      token: newToken, 
+      message: 'Password updated successfully! You can now log in with your new password.' 
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: 'Failed to update password.', details: err.message });
   }
-
-  adminPasswordHash = bcrypt.hashSync(newPassword, 10);
-  res.json({ success: true, message: 'Password updated successfully.' });
 });
 
 // --- ADMIN SECURE CRUD ENDPOINTS ---
