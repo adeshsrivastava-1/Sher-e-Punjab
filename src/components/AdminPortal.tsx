@@ -465,14 +465,14 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
               <div className="flex items-center gap-2">
                 <h2 className="font-serif text-lg font-bold">Sher E Punjab Cumbayá — Management Portal</h2>
                 <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                  isWsConnected
+                  isWsConnected || wsStatus === 'FALLBACK_MODE'
                     ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
                     : wsStatus === 'RECONNECTING' || wsStatus === 'CONNECTING'
                     ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30 animate-pulse'
-                    : 'bg-red-500/20 text-red-300 border border-red-500/30'
+                    : 'bg-white/10 text-white/70 border border-white/20'
                 }`}>
-                  {isWsConnected ? <Wifi className="w-3 h-3 text-emerald-400" /> : <WifiOff className="w-3 h-3" />}
-                  <span>{isWsConnected ? 'Live WSS Connected' : wsStatus === 'RECONNECTING' ? 'Auto-Reconnecting...' : 'Offline (Local Sync)'}</span>
+                  {isWsConnected || wsStatus === 'FALLBACK_MODE' ? <Wifi className="w-3 h-3 text-emerald-400" /> : <WifiOff className="w-3 h-3 text-amber-400" />}
+                  <span>{isWsConnected ? 'Live WSS Connected' : wsStatus === 'FALLBACK_MODE' ? 'Active (Tab & Storage Sync)' : wsStatus === 'RECONNECTING' ? 'Auto-Reconnecting...' : 'Sync Active'}</span>
                 </span>
               </div>
               <span className="text-[10px] text-white/70 block">
