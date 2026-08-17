@@ -2,8 +2,7 @@ import express, { Request, Response, NextFunction } from 'express';
 import cookieParser from 'cookie-parser';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import { INITIAL_MENU_ITEMS, INITIAL_RESTAURANT_CONFIG } from '../src/data/initialMenu';
-import { MenuItem, RestaurantConfig } from '../src/types';
+import { INITIAL_MENU_ITEMS, INITIAL_RESTAURANT_CONFIG, MenuItem, RestaurantConfig } from './data';
 
 // In-memory state for serverless execution
 let menuItems: MenuItem[] = [...INITIAL_MENU_ITEMS];
