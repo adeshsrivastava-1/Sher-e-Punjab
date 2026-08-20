@@ -1,10 +1,11 @@
-import tailwindcss from '@tailwindcss/vite';
-import react from '@vitejs/plugin-react';
 import path from 'path';
 import { defineConfig } from 'vite';
+import react from '@vitejs/plugin-react';
+import tailwindcss from '@tailwindcss/vite';
 
 export default defineConfig(() => {
   return {
+    base: '/Sher-e-Punjab/',
     plugins: [react(), tailwindcss()],
     resolve: {
       alias: {
